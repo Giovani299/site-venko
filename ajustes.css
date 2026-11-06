@@ -1,0 +1,72 @@
+/* Ajustes de leitura e de tela para celular, tablet, notebook e computador (VENKO). */
+
+/* Nenhuma parte da página pode passar da largura da tela */
+body { overflow-x: clip; }
+h1, h2, h3, blockquote, strong, p { overflow-wrap: break-word; }
+h1, h2 { text-wrap: balance; }
+
+/* Itens de grade/colunas podem encolher (sem isso, um item largo empurra a página) */
+.intro > *, .split > *, .sectionHead > *, .dataGrid > *, .proseGrid > *, .systemDetail > *,
+.case > *, .jobs > *, .roadmap > *, .contact > *, .proof > *, .missionVision .wrap > *,
+.operationsGallery > *, .footerTop > *, .triad > *, .companyGrid > *, .heroContent { min-width: 0; }
+.heroContent { max-width: min(1050px, 100%); }
+/* a palavra INFRAESTRUTURA sempre cabe inteira na largura do texto do topo */
+.hero h1 { font-size: min(clamp(55px, 8.8vw, 134px), calc((min(1050px, 100vw) - 2 * var(--pad)) / 8.6)); }
+
+/* Verde-limão sobre fundo claro fica ilegível: troca por um verde escuro da mesma família */
+.vk-lime-claro { color: #467000 !important; }
+
+/* Títulos com tamanho fixo passam a se ajustar à tela */
+.sticky h2, .contact h2 { font-size: clamp(38px, 5vw, 65px); }
+.jobs h2, .roadmap h2 { font-size: clamp(36px, 4.6vw, 60px); }
+.triad h2 { font-size: clamp(34px, 3.8vw, 50px); }
+.metric strong { font-size: clamp(44px, 5.4vw, 70px); }
+
+/* Etapas que nao cabem numa linha passam para a linha de baixo (nada fica escondido a direita) */
+.flow { flex-wrap: wrap; overflow: visible; }
+.people .flow > div:after { display: none; }
+
+/* Tablet e celular */
+@media (max-width: 900px) {
+  /* etapas (Planejar → Executar → ...) quebram em linhas em vez de esconder à direita */
+  .flow { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); overflow: visible; border-top: 0; }
+  .flow > div { min-width: 0; border-top: 1px solid var(--line); }
+  .flow > div:after { display: none; }
+  .people .flow > div { padding-left: 16px; }
+  .serviceGrid article, .pillarGrid article, .metric { min-width: 0; }
+  .dashboard { padding: 18px; }
+  .footerBottom { flex-wrap: wrap; gap: 10px; }
+  .placeholder small { flex-basis: 100%; }
+}
+
+/* Celular */
+@media (max-width: 560px) {
+  .hero { height: auto; min-height: 100svh; }
+  .hero h1 { font-size: clamp(30px, 10vw, 51px); }
+  .hero p { font-size: 16px; }
+  .heroMeta { font-size: 10px; }
+  .pageHero { min-height: 0; padding: 140px 0 70px; }
+  .pageHero h1 { font-size: clamp(34px, 10vw, 58px); margin-bottom: 26px; }
+  .pageHero p { font-size: 17px; }
+  .pageNumber { top: 100px; }
+  h2 { font-size: clamp(34px, 9.5vw, 46px); }
+  .sectionHead h2, .proseGrid h2, .data h2, .caseCopy h2, .proofCopy h2, .galleryText h2,
+  .missionVision h2, .culture h2, .future h2, .cta h2 { font-size: clamp(34px, 9.5vw, 46px); }
+  .culture blockquote, .statement blockquote { font-size: clamp(30px, 8.6vw, 44px); }
+  .editorialBand strong, .mobilizationImage strong { font-size: clamp(28px, 8vw, 40px); }
+  .caseVisual div { font-size: clamp(40px, 12vw, 55px); }
+  .intro .lead, .lead { font-size: 19px; }
+  .copyPanel, .galleryText { padding: 70px var(--pad); }
+  .dashCells strong { font-size: 24px; }
+  .metric { padding: 22px 14px 28px; }
+  .footerLinks { grid-template-columns: 1fr; gap: 28px; }
+  .placeholder { padding: 24px; }
+  .success { padding: 32px 24px; }
+  .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Celulares bem estreitos (320–360 px) */
+@media (max-width: 360px) {
+  .logo { font-size: 22px; }
+  .metricGrid, .dashCells { grid-template-columns: 1fr; }
+}
