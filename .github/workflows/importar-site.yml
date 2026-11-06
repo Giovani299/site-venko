@@ -130,6 +130,7 @@ jobs:
           NOVO = 'Sua mensagem vai direto para a equipe da VENKO. Responderemos pelo e-mail informado.'
           TAG = '<script src="/contato-envio.js" defer></script>'
           TAG_RDO = '<script src="/rdo-mudou.js"></script>'
+          TAG_AJ = '<link rel="stylesheet" href="/ajustes.css?v=1"/><script src="/ajustes.js?v=1" defer></script>'  # ajustes de tela (arquivos fixos no repositório)
           cont = {'aviso': 0, 'dominio': 0, 'imagens': 0, 'script': 0}
           for p, arq in salvos.items():
               if not os.path.exists(arq) or not arq.endswith(('.html', '.txt', '.js', '.css', '.xml', '.json', '.webmanifest')):
@@ -146,6 +147,8 @@ jobs:
               t = t.replace(ORIGEM.replace('https://', ''), DOMINIO.replace('https://', ''))
               if arq.endswith('.html') and TAG not in t and '</body>' in t:
                   t = t.replace('</body>', TAG + '</body>', 1); cont['script'] += 1
+              if arq.endswith('.html') and 'ajustes.css' not in t and '</head>' in t:
+                  t = t.replace('</head>', TAG_AJ + '</head>', 1)
               if arq.endswith('.html') and TAG_RDO not in t:
                   t = re.sub(r'<head(?:\s[^>]*)?>', lambda m: m.group(0) + TAG_RDO, t, count=1)
               if t != o:
