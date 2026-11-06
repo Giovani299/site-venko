@@ -141,6 +141,8 @@ jobs:
               for aviso in (AVISO_UTF8, AVISO_JS):
                   cont['aviso'] += t.count(aviso); t = t.replace(aviso, NOVO)
               cont['dominio'] += t.count(ORIGEM); t = t.replace(ORIGEM, DOMINIO)
+              for velho in ('https://venko-engenharia.example',):  # endereço provisório usado no sitemap/robots
+                  cont['dominio'] += t.count(velho); t = t.replace(velho, DOMINIO)
               t = t.replace(ORIGEM.replace('https://', ''), DOMINIO.replace('https://', ''))
               if arq.endswith('.html') and TAG not in t and '</body>' in t:
                   t = t.replace('</body>', TAG + '</body>', 1); cont['script'] += 1
