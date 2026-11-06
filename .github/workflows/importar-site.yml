@@ -1,0 +1,301 @@
+# Importa o site institucional da VENKO (feito no ChatGPT pelo Clayton) para este repositório.
+# Ele é publicado pelo GitHub Pages em https://construtoravenko.com.br (o RDO fica em https://rdo.construtoravenko.com.br).
+# Rode pelo botão "Run workflow" sempre que o site for atualizado lá no ChatGPT.
+# O que ele faz: baixa as 8 páginas e os arquivos, converte as fotos PNG (2–3 MB cada) para WebP,
+# troca o endereço antigo pelo da Venko, liga o formulário de Contato ao e-mail,
+# leva quem ainda abre o RDO pelo endereço antigo para o endereço novo (sem perder RDO salvo no aparelho)
+# e grava tudo aqui. O GitHub Pages publica sozinho em seguida.
+name: Importar site do ChatGPT
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: importar-site
+  cancel-in-progress: false
+
+jobs:
+  importar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar conversor de imagens
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq python3-pil
+
+      - name: Baixar e ajustar o site
+        env:
+          ORIGEM: https://venko-engenharia-br.claytongn22.chatgpt.site
+          DOMINIO: https://construtoravenko.com.br
+          RDO_URL: https://rdo.construtoravenko.com.br
+          EMAIL_CONTATO: wiliam.souza@construtoravenko.com.br
+          DESTINO_DIR: .
+        run: |
+          /usr/bin/python3 - <<'PY'
+          import os, re, sys, json, urllib.request, urllib.parse, io
+
+          def ascii_js(t):
+              return ''.join(c if ord(c) < 128 else '\\u%04x' % ord(c) for c in t)
+
+          ORIGEM = os.environ.get('ORIGEM', 'https://venko-engenharia-br.claytongn22.chatgpt.site').rstrip('/')
+          DOMINIO = os.environ.get('DOMINIO', 'https://construtoravenko.com.br')
+          RDO = os.environ.get('RDO_URL', 'https://rdo.construtoravenko.com.br')
+          DESTINO = os.environ.get('DESTINO_DIR', '.')
+          EMAIL = os.environ.get('EMAIL_CONTATO', 'wiliam.souza@construtoravenko.com.br')
+          UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
+
+          PAGINAS = ['/', '/saneamento/', '/como-operamos/', '/operacoes/', '/seguranca-qualidade/',
+                     '/carreiras/', '/empresa/', '/contato/']
+          fila, vistos, salvos = [], set(), {}
+
+          def add(p):
+              p = p.split('#')[0].split('?')[0]
+              if not p.startswith('/') or p.startswith('//') or p in vistos:
+                  return
+              vistos.add(p); fila.append(p)
+
+          for p in PAGINAS:
+              add(p); add(p + 'index.txt')
+          for p in ['/404.html', '/robots.txt', '/sitemap.xml', '/favicon.ico', '/icon.png', '/icon.svg',
+                    '/apple-icon.png', '/manifest.webmanifest', '/opengraph-image.png']:
+              add(p)
+
+          REF = re.compile(r'(/_next/[^"\'\\\s)<>]+|/[A-Za-z0-9_\-/.]+\.(?:jpg|jpeg|png|webp|svg|gif|ico|mp4|webm|woff2?|ttf|otf|json|webmanifest|xml|txt|css|js))')
+          TEXTO = re.compile(r'text|javascript|css|json|xml|svg')
+
+          def baixar(p):
+              req = urllib.request.Request(ORIGEM + urllib.parse.quote(p), headers={'User-Agent': UA, 'Accept': '*/*'})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return r.status, r.headers.get('Content-Type', ''), r.read()
+
+          def local(p):
+              return os.path.join(DESTINO, (p + 'index.html' if p.endswith('/') else p).lstrip('/'))
+
+          erros = []
+          while fila:
+              p = fila.pop(0)
+              try:
+                  st, ct, dado = baixar(p)
+              except Exception as e:
+                  if p in PAGINAS or p.startswith('/_next/') or p.endswith('index.txt'):
+                      erros.append(f'{p}: {e}')
+                  continue
+              if st != 200:
+                  continue
+              salvos[p] = local(p)
+              os.makedirs(os.path.dirname(salvos[p]), exist_ok=True)
+              with open(salvos[p], 'wb') as f:
+                  f.write(dado)
+              if TEXTO.search(ct) or p.endswith(('.html', '/', '.txt', '.css', '.js', '.xml')):
+                  t = dado.decode('utf-8', 'replace')
+                  for m in REF.findall(t):
+                      add(m.replace('\\u0026', '&'))
+                  for u in re.findall(r'url\(([^)]+)\)', t):
+                      u = u.strip('\'" ')
+                      if u.startswith('data:') or u.startswith('http'):
+                          continue
+                      add(u if u.startswith('/') else urllib.parse.urljoin(p, u))
+
+          if erros:
+              print('::error::Falha ao baixar:\n' + '\n'.join(erros))
+              sys.exit(1)
+          paginas_ok = [p for p in PAGINAS if p in salvos]
+          if len(paginas_ok) != len(PAGINAS):
+              print('::error::Faltaram páginas: ' + ', '.join(set(PAGINAS) - set(paginas_ok)))
+              sys.exit(1)
+          print(f'Baixados {len(salvos)} arquivos')
+
+          # --- fotos: PNG pesado -> WebP (máx. 1920 px de largura) ---
+          from PIL import Image
+          trocas = {}
+          for p, arq in list(salvos.items()):
+              if p.lower().endswith('.png') and os.path.getsize(arq) > 300_000:
+                  im = Image.open(arq)
+                  if im.width > 1920:
+                      im = im.resize((1920, round(im.height * 1920 / im.width)), Image.LANCZOS)
+                  novo = arq[:-4] + '.webp'
+                  im.save(novo, 'WEBP', quality=80, method=6)
+                  antes, depois = os.path.getsize(arq), os.path.getsize(novo)
+                  os.remove(arq)
+                  trocas[p] = p[:-4] + '.webp'
+                  print(f'  {p}: {antes // 1024} KB -> {depois // 1024} KB')
+
+          # --- textos ---
+          AVISO_UTF8 = 'Este formulário é uma interface demonstrativa. O canal de envio será conectado após a definição do e-mail institucional.'
+          AVISO_JS = 'Este formul\\xe1rio \\xe9 uma interface demonstrativa. O canal de envio ser\\xe1 conectado ap\\xf3s a defini\\xe7\\xe3o do e-mail institucional.'
+          NOVO = 'Sua mensagem vai direto para a equipe da VENKO. Responderemos pelo e-mail informado.'
+          TAG = '<script src="/contato-envio.js" defer></script>'
+          TAG_RDO = '<script src="/rdo-mudou.js"></script>'
+          cont = {'aviso': 0, 'dominio': 0, 'imagens': 0, 'script': 0}
+          for p, arq in salvos.items():
+              if not os.path.exists(arq) or not arq.endswith(('.html', '.txt', '.js', '.css', '.xml', '.json', '.webmanifest')):
+                  continue
+              t = open(arq, encoding='utf-8').read()
+              o = t
+              for a, b in trocas.items():
+                  cont['imagens'] += t.count(a); t = t.replace(a, b)
+              for aviso in (AVISO_UTF8, AVISO_JS):
+                  cont['aviso'] += t.count(aviso); t = t.replace(aviso, NOVO)
+              cont['dominio'] += t.count(ORIGEM); t = t.replace(ORIGEM, DOMINIO)
+              t = t.replace(ORIGEM.replace('https://', ''), DOMINIO.replace('https://', ''))
+              if arq.endswith('.html') and TAG not in t and '</body>' in t:
+                  t = t.replace('</body>', TAG + '</body>', 1); cont['script'] += 1
+              if arq.endswith('.html') and TAG_RDO not in t:
+                  t = re.sub(r'<head(?:\s[^>]*)?>', lambda m: m.group(0) + TAG_RDO, t, count=1)
+              if t != o:
+                  open(arq, 'w', encoding='utf-8').write(t)
+          print('Trocas:', json.dumps(cont))
+          if cont['aviso'] == 0:
+              print('::warning::Não achei o aviso de "formulário demonstrativo" para trocar.')
+
+          # --- envio do formulário de contato ---
+          open(os.path.join(DESTINO, 'contato-envio.js'), 'w', encoding='utf-8').write(ascii_js(r'''/* Envio do formulário de Contato por e-mail (FormSubmit). */
+          (function () {
+            var EMAIL = '__EMAIL__';
+            var URL_ENVIO = 'https://formsubmit.co/ajax/' + EMAIL;
+            function texto(el, s) { el.textContent = s; return el; }
+            function aviso(form, msg) {
+              var p = form.querySelector('.envio-erro');
+              if (!p) { p = document.createElement('p'); p.className = 'envio-erro'; p.setAttribute('role', 'alert');
+                p.style.cssText = 'color:#ff8a7a;margin:8px 0 0;font-size:14px;'; form.appendChild(p); }
+              p.textContent = msg;
+            }
+            function sucesso(form, nome) {
+              var box = document.createElement('div');
+              box.className = 'success'; box.setAttribute('role', 'status');
+              box.appendChild(texto(document.createElement('span'), '✓'));
+              box.appendChild(texto(document.createElement('h3'), 'Mensagem enviada'));
+              box.appendChild(texto(document.createElement('p'), 'Obrigado' + (nome ? ', ' + nome.split(' ')[0] : '') + '. Recebemos seu contato e responderemos pelo e-mail informado.'));
+              form.style.display = 'none';
+              form.parentNode.insertBefore(box, form.nextSibling);
+            }
+            window.addEventListener('submit', function (ev) {
+              var form = ev.target;
+              if (!form || !form.querySelector || !form.querySelector('[name="mensagem"]')) return;
+              ev.preventDefault(); ev.stopImmediatePropagation();
+              if (form.dataset.enviando === '1') return;
+              var d = {}; new FormData(form).forEach(function (v, k) { d[k] = String(v).trim(); });
+              var btn = form.querySelector('button[type="submit"]');
+              form.dataset.enviando = '1'; if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
+              var corpo = {
+                _subject: 'Site VENKO — ' + (d.assunto || 'Contato') + ' — ' + (d.nome || ''),
+                _template: 'table', _replyto: d.email, _captcha: 'false',
+                'Nome': d.nome, 'Empresa': d.empresa, 'Cargo': d.cargo || '—', 'Telefone': d.telefone || '—',
+                'E-mail': d.email, 'Assunto': d.assunto, 'Mensagem': d.mensagem
+              };
+              fetch(URL_ENVIO, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(corpo) })
+                .then(function (r) { return r.json().catch(function () { return {}; }); })
+                .then(function (j) {
+                  if (String(j.success) === 'true') { sucesso(form, d.nome); return; }
+                  throw new Error(j.message || 'falha');
+                })
+                .catch(function () {
+                  aviso(form, 'Não foi possível enviar agora. Tente de novo em instantes ou escreva para ' + EMAIL + '.');
+                })
+                .then(function () { form.dataset.enviando = ''; if (btn) { btn.disabled = false; btn.style.opacity = ''; } });
+            }, true);
+          })();
+          '''.replace('__EMAIL__', EMAIL)))
+
+          # --- o RDO saiu daqui e foi para rdo.construtoravenko.com.br ---
+          # sw.js: substitui o "service worker" antigo do RDO neste endereço, apaga o cache dele e se desliga.
+          open(os.path.join(DESTINO, 'sw.js'), 'w', encoding='utf-8').write("""/* O RDO mudou para __RDO__ . Este arquivo desliga o service worker antigo do RDO neste endereço. */
+          self.addEventListener('install', function () { self.skipWaiting(); });
+          self.addEventListener('activate', function (event) {
+            event.waitUntil(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })
+              .then(function () { return self.registration.unregister(); })
+              .then(function () { return self.clients.matchAll({ type: 'window' }); })
+              .then(function (cs) { cs.forEach(function (c) { try { c.navigate(c.url); } catch (e) {} }); }));
+          });
+          """.replace('__RDO__', RDO))
+          # rdo-mudou.js: quem usava o RDO neste endereço (app instalado ou login salvo) é levado ao endereço novo.
+          # RDOs salvos no aparelho e ainda não enviados são passados para o endereço novo antes, sem perder nada.
+          open(os.path.join(DESTINO, 'rdo-mudou.js'), 'w', encoding='utf-8').write(ascii_js(r"""(function () {
+            var NOVO = '__RDO__';
+            var CHAVES = /^(sb-[a-z0-9]+-auth-token|rdoVenkoTheme|vkPushSugestao|vkBackupUltimo)$/;
+            var instalado = false, usava = false;
+            try { instalado = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; } catch (e) {}
+            try { for (var i = 0; i < localStorage.length; i++) { if (CHAVES.test(localStorage.key(i))) { usava = true; break; } } } catch (e) {}
+            if (!instalado && !usava) return;
+            var root = document.documentElement; root.style.visibility = 'hidden';
+            function limpar() {
+              try { var ks = []; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (CHAVES.test(k)) ks.push(k); } ks.forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {}
+            }
+            function ir() { limpar(); window.location.replace(NOVO + '/'); }
+            function lerPendentes() {
+              return new Promise(function (ok) {
+                if (!window.indexedDB) return ok({ itens: [] });
+                var r; try { r = indexedDB.open('rdoVenkoOffline'); } catch (e) { return ok({ itens: [] }); }
+                r.onupgradeneeded = function () { try { r.transaction.abort(); } catch (e) {} };
+                r.onerror = function () { ok({ itens: [] }); };
+                r.onsuccess = function () {
+                  var db = r.result;
+                  if (!db.objectStoreNames.contains('pendingRdos')) { db.close(); return ok({ itens: [] }); }
+                  var q = db.transaction('pendingRdos', 'readonly').objectStore('pendingRdos').getAll();
+                  q.onsuccess = function () { db.close(); ok({ itens: q.result || [] }); };
+                  q.onerror = function () { db.close(); ok({ itens: [], erro: true }); };
+                };
+              });
+            }
+            function transferir(itens) {
+              return new Promise(function (ok, falha) {
+                var f = document.createElement('iframe'); f.style.display = 'none'; f.src = NOVO + '/migrar.html';
+                var t = setTimeout(function () { removeEventListener('message', h); falha(); }, 25000);
+                function h(ev) {
+                  if (ev.origin !== NOVO || !ev.data) return;
+                  if (ev.data.tipo === 'vk-migrar-pronto') f.contentWindow.postMessage({ tipo: 'vk-migrar-pendentes', itens: itens }, NOVO);
+                  else if (ev.data.tipo === 'vk-migrar-ok' && ev.data.n === itens.length) { clearTimeout(t); removeEventListener('message', h); ok(); }
+                  else if (ev.data.tipo === 'vk-migrar-erro') { clearTimeout(t); removeEventListener('message', h); falha(); }
+                }
+                addEventListener('message', h);
+                (document.body || root).appendChild(f);
+              });
+            }
+            function aviso(n) {
+              root.style.visibility = '';
+              var d = document.createElement('div');
+              d.setAttribute('role', 'alert');
+              d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0b0f0c;color:#fff;display:flex;align-items:center;justify-content:center;padding:24px;font:16px/1.5 system-ui,sans-serif;text-align:center';
+              d.innerHTML = '<div style="max-width:420px"><h2 style="margin:0 0 12px;font-size:22px">O RDO mudou de endereço</h2>' +
+                '<p style="margin:0 0 20px">Este aparelho tem ' + n + ' RDO' + (n > 1 ? 's' : '') + ' salvo' + (n > 1 ? 's' : '') + ' que ainda não ' + (n > 1 ? 'foram enviados' : 'foi enviado') +
+                '. Conecte-se à internet e toque em "Tentar de novo" para levá-' + (n > 1 ? 'los' : 'lo') + ' ao endereço novo sem perder nada.</p>' +
+                '<button type="button" style="background:#c6f432;color:#0b0f0c;border:0;border-radius:8px;padding:12px 20px;font-weight:700;font-size:16px;cursor:pointer">Tentar de novo</button></div>';
+              d.querySelector('button').onclick = function () { window.location.reload(); };
+              (document.body || root).appendChild(d);
+            }
+            function seguir() {
+              lerPendentes().then(function (r) {
+                if (r.erro) return aviso(1);
+                if (!r.itens.length) return ir();
+                transferir(r.itens).then(function () {
+                  try { indexedDB.deleteDatabase('rdoVenkoOffline'); } catch (e) {}
+                  ir();
+                }, function () { aviso(r.itens.length); });
+              });
+            }
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', seguir); else seguir();
+          })();
+          """.replace('__RDO__', RDO)))
+
+          open(os.path.join(DESTINO, 'CNAME'), 'w').write(DOMINIO.replace('https://', '') + '\n')
+          open(os.path.join(DESTINO, '.nojekyll'), 'w').write('')
+          restos = [p for p, a in salvos.items() if os.path.exists(a) and a.endswith(('.html', '.txt', '.js', '.xml'))
+                    and 'chatgpt.site' in open(a, encoding='utf-8', errors='replace').read()]
+          if restos:
+              print('::warning::Ainda citam chatgpt.site: ' + ', '.join(restos))
+          print('Pronto.')
+
+          PY
+
+      - name: Gravar no repositório
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "Nada mudou."; exit 0; fi
+          git commit -q -m "Importa o site do ChatGPT ($(date -u +%Y-%m-%d))"
+          git push
